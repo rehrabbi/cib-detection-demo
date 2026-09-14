@@ -8,7 +8,10 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install frontend dependencies
-RUN npm install
+# npm ci installs exactly what package-lock.json records. npm install is free to
+# resolve newer versions inside the ^ ranges, so two builds from the same commit
+# could ship different frontend dependencies.
+RUN npm ci
 
 # Copy the rest of the frontend code
 COPY . .
