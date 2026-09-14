@@ -32,8 +32,8 @@ const stylesheet: any[] = [
   {
     selector: 'edge',
     style: {
-      width: 2, 
-      'line-color': '#6B7280', 
+      width: 2,
+      'line-color': '#6B7280',
       'curve-style': 'haystack',
       opacity: 0.35,
     },
@@ -48,38 +48,79 @@ const stylesheet: any[] = [
   },
 ]
 
-const buildSafeGraphElements = (result: any) => {
-  // --- HANS' PERFORMANCE CAP (Stops the lag on 3+ videos!) ---
-  const fullList = result.allCommenters || result.commenters;
-  if (!fullList) return [];
+// Render budget. On a two-video job the co-commenter graph is a clique among
+// commenters present on both videos, so edges grow quadratically with overlap.
+// These caps keep the renderer responsive; truncation is shown in the legend
+// rather than hidden.
+const MAX_CONNECTED_NODES = 500;
+const MAX_ISOLATED_CONTEXT = 60;
+const MAX_EDGES = 25000;
 
-  const MAX_CONTEXT_NODES = 80;
-  const top100Set = new Set((result.commenters || []).map((c: any) => c.hashId));
-  const rest = fullList.filter((c: any) => !top100Set.has(c.hashId));
-  
-  const sourceList = [...(result.commenters || []), ...rest.slice(0, MAX_CONTEXT_NODES)];
+const buildGraph = (result: any) => {
+  const raw = result?.networkGraph?.elements;
+  if (!Array.isArray(raw) || raw.length === 0) return { elements: [], stats: null };
 
-  const nodes = sourceList.map((c: any) => ({
-    data: { id: c.hashId, label: c.label, risk: c.riskScore, kind: c.label.toLowerCase() },
-    classes: top100Set.has(c.hashId) ? 'clickable' : 'unclickable' 
+  const rawNodes = raw.filter((e: any) => e?.data && e.data.source === undefined);
+  const rawEdges = raw.filter((e: any) => e?.data && e.data.source !== undefined);
+
+  const degree = new Map<string, number>();
+  for (const e of rawEdges) {
+    degree.set(e.data.source, (degree.get(e.data.source) || 0) + 1);
+    degree.set(e.data.target, (degree.get(e.data.target) || 0) + 1);
+  }
+
+  // Commenters below the edge threshold have no edges at all. Showing every one
+  // of them drowns the structure, so connected nodes come first and isolated
+  // nodes appear only as bounded context.
+  const connected = rawNodes.filter((n: any) => degree.has(n.data.id));
+  const isolated = rawNodes.filter((n: any) => !degree.has(n.data.id));
+  connected.sort((a: any, b: any) => (degree.get(b.data.id) || 0) - (degree.get(a.data.id) || 0));
+
+  const riskById = new Map<string, number>();
+  for (const c of (result.allCommenters || result.commenters || [])) {
+    riskById.set(c.hashId, c.riskScore ?? 0);
+  }
+  const clickable = new Set((result.commenters || []).map((c: any) => c.hashId));
+
+  const keptNodes = [
+    ...connected.slice(0, MAX_CONNECTED_NODES),
+    ...isolated.slice(0, MAX_ISOLATED_CONTEXT),
+  ];
+  const keptIds = new Set(keptNodes.map((n: any) => n.data.id));
+
+  let keptEdges = rawEdges.filter(
+    (e: any) => keptIds.has(e.data.source) && keptIds.has(e.data.target)
+  );
+  const edgesTruncated = keptEdges.length > MAX_EDGES;
+  if (edgesTruncated) keptEdges = keptEdges.slice(0, MAX_EDGES);
+
+  const nodes = keptNodes.map((n: any) => ({
+    data: {
+      id: n.data.id,
+      label: n.data.classification ?? n.data.label,
+      risk: riskById.get(n.data.id) ?? 0,
+      kind: String(n.data.classification ?? '').toLowerCase(),
+      degree: degree.get(n.data.id) || 0,
+    },
+    classes: clickable.has(n.data.id) ? 'clickable' : 'unclickable',
   }));
 
-  const edges = [];
-  
-  // --- THE ORIGINAL WEB LOGIC ---
-  // This creates the natural, organic connections so the physics engine can 
-  // push and pull them into that beautiful "hairball" shape you like.
-  for (let i = 1; i < nodes.length; i++) {
-    const targetIndex = Math.random() > 0.3 
-      ? Math.floor(Math.random() * Math.min(10, i)) 
-      : Math.floor(Math.random() * i);
-      
-    edges.push({
-      data: { source: nodes[i].data.id, target: nodes[targetIndex].data.id }
-    });
-  }
-  
-  return [...nodes, ...edges];
+  const edges = keptEdges.map((e: any, i: number) => ({
+    data: { id: e.data.id ?? `e${i}`, source: e.data.source, target: e.data.target },
+  }));
+
+  return {
+    elements: [...nodes, ...edges],
+    stats: {
+      totalNodes: rawNodes.length,
+      totalEdges: rawEdges.length,
+      connected: connected.length,
+      isolated: isolated.length,
+      shownNodes: nodes.length,
+      shownEdges: edges.length,
+      truncated: edgesTruncated || connected.length > MAX_CONNECTED_NODES,
+    },
+  };
 };
 
 interface NetworkGraphProps {
@@ -91,7 +132,22 @@ interface NetworkGraphProps {
 
 export default function NetworkGraph({ result, selectedId, onSelect, onInit }: NetworkGraphProps) {
   const [cy, setCy] = useState<any>(null);
-  const elements = useMemo(() => buildSafeGraphElements(result), [result]);
+  const { elements, stats } = useMemo(() => buildGraph(result), [result]);
+
+  // A clique of n nodes carries n(n-1)/2 edges, which at the default opacity
+  // paints a solid disc and hides the nodes. Thin and fade edges as density
+  // rises so the mesh stays readable.
+  const densityStylesheet = useMemo(() => {
+    const edgeCount = stats?.shownEdges ?? 0;
+    if (edgeCount <= 1500) return stylesheet;
+    const opacity = edgeCount > 15000 ? 0.04 : edgeCount > 6000 ? 0.08 : 0.15;
+    const width = edgeCount > 6000 ? 0.5 : 1;
+    return stylesheet.map((rule: any) =>
+      rule.selector === 'edge'
+        ? { ...rule, style: { ...rule.style, opacity, width } }
+        : rule
+    );
+  }, [stats]);
 
   const meanClustering = useMemo(() => {
     if (!result?.commenters?.length) return 0;
@@ -134,7 +190,7 @@ export default function NetworkGraph({ result, selectedId, onSelect, onInit }: N
   const handleZoomIn = () => { if (cy) cy.zoom(cy.zoom() + 0.2); };
   const handleZoomOut = () => { if (cy) cy.zoom(cy.zoom() - 0.2); };
 
-  if (!elements.length) return <div className="p-10 text-center text-gray-500">Loading graph...</div>;
+  if (!elements.length) return <div className="p-10 text-center text-gray-500">No co-commenter edges to display. A commenter must appear on both videos to form an edge.</div>;
 
   return (
     <div className="animate-in fade-in duration-300 h-full w-full">
@@ -145,19 +201,21 @@ export default function NetworkGraph({ result, selectedId, onSelect, onInit }: N
             if (onInit) onInit(cyInstance); 
           }}
           elements={elements}
-          stylesheet={stylesheet}
+          stylesheet={densityStylesheet}
           style={{ width: '100%', height: '100%' }}
           
           // --- THE PHYSICS ENGINE ('cose') ---
           // This calculates the gravity and repulsion to give you that organic look.
-          layout={{ 
-            name: 'cose', 
-            animate: false, // Keep this false so your export doesn't freeze
-            padding: 30,
-            nodeRepulsion: 4000, // Pushes nodes apart so they don't clump
-            idealEdgeLength: 50,
-            randomize: true
-          }}
+          // Force layout cannot settle a dense clique, so anything large falls
+          // back to a deterministic concentric ring keyed on degree.
+          layout={
+            elements.length > 3000
+              ? { name: 'concentric', animate: false, padding: 30,
+                  concentric: (n: any) => n.data('degree') || 0,
+                  levelWidth: () => 1, minNodeSpacing: 8 }
+              : { name: 'cose', animate: false, padding: 30,
+                  nodeRepulsion: 4000, idealEdgeLength: 50, randomize: true }
+          }
           minZoom={0.2} maxZoom={2.5} wheelSensitivity={0.2}
           autounselectify={true}
           autoungrabify={true} 
@@ -172,6 +230,18 @@ export default function NetworkGraph({ result, selectedId, onSelect, onInit }: N
             <AlertTriangle className="w-3.5 h-3.5" /> 
             {isHighDensity ? 'High Density Network' : 'Low Density Network'}
           </div>
+
+          {stats && (
+            <div className="mt-1 border-t border-gray-200 pt-2 font-normal text-[11px] leading-relaxed text-gray-500">
+              <div>{stats.connected.toLocaleString()} connected / {stats.isolated.toLocaleString()} isolated</div>
+              <div>{stats.totalEdges.toLocaleString()} edges</div>
+              {stats.truncated && (
+                <div className="text-[#B45309]">
+                  showing {stats.shownNodes.toLocaleString()} nodes, {stats.shownEdges.toLocaleString()} edges
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="absolute right-4 bottom-4 flex flex-col gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200 z-10">

@@ -23,8 +23,6 @@ limiter = Limiter(key_func=get_remote_address, storage_uri=settings.redis_url)
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
-MOCK_ML_PIPELINE = False # remove once the ML pipeline is fully integrated and tested 
-
 
 @router.post("", response_model=JobSubmitResponse, status_code=202)
 @limiter.limit("5/minute") 
@@ -64,19 +62,15 @@ def submit_job(
             video_id_2=vid_2,
             status=JobStatus.PENDING.value,
             progress=0,
-            message="Job queued. (Mock Mode Active)" if MOCK_ML_PIPELINE else "Job queued.",
+            message="Job queued.",
             used_sample_data=use_sample,
         )
         db.add(job)
         db.commit()
         db.refresh(job)
 
-        # Trigger Pipeline OR Mock, remove once the ML pipeline is fully integrated and tested
-        if MOCK_ML_PIPELINE:
-            pass
-        else:
-            run_detection.delay(job_id)
-            
+        run_detection.delay(job_id)
+
         return JobSubmitResponse(job_id=job_id, status=job.status)
         
     except Exception as e:

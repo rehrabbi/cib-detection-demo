@@ -1,9 +1,8 @@
 // ---------------------------------------------------------------------------
 // API integration point.
 //
-// Right now the app runs entirely on the mock layer (src/lib/mockData.ts) so it
-// works with no backend. When your FastAPI service is live, implement the calls
-// below and switch JobContext + Progress to use them instead of the simulator.
+// These calls talk to the live FastAPI backend. The base URL comes from
+// VITE_API_BASE_URL, which docker-compose supplies.
 // ---------------------------------------------------------------------------
 
 import type { JobResult } from '../types'

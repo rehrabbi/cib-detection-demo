@@ -8,14 +8,15 @@ import {
 } from 'react'
 import type { JobResult, StagedVideo } from '../types'
 import { createJob, fetchResult } from './api'
+import type { CreateJobBody } from './api'
 
 interface JobState {
   staged: StagedVideo[]
-  useSampleData: boolean
+  useSampleData: boolean | null
   currentJobId: string | null
   result: JobResult | null
   setStaged: (v: StagedVideo[]) => void
-  setUseSampleData: (v: boolean) => void
+  setUseSampleData: (v: boolean | null) => void
   /** Submits the URLs to the FastAPI backend and stores the job ID. */
   startDetectionJob: () => Promise<string>
   /** Fetches the final result once the backend finishes processing. */
@@ -27,7 +28,11 @@ const JobContext = createContext<JobState | null>(null)
 
 export function JobProvider({ children }: { children: ReactNode }) {
   const [staged, setStaged] = useState<StagedVideo[]>([])
-  const [useSampleData, setUseSampleData] = useState(true)
+  // null means "let the server decide". The backend treats a null
+  // use_sample_data as "use the USE_SAMPLE_DATA setting from .env", so the UI
+  // must not send a value unless the user has actually chosen one. Sending a
+  // hardcoded value here silently overrides the server's configuration.
+  const [useSampleData, setUseSampleData] = useState<boolean | null>(null)
   const [currentJobId, setCurrentJobId] = useState<string | null>(null)
   const [result, setResult] = useState<JobResult | null>(null)
 
@@ -36,11 +41,14 @@ export function JobProvider({ children }: { children: ReactNode }) {
       throw new Error('Please stage at least 2 videos before starting.')
     }
 
-    // Map the UI state to the backend schema
-    const body = {
+    // Map the UI state to the backend schema. use_sample_data is omitted
+    // unless explicitly set, so the server's .env setting governs by default.
+    const body: CreateJobBody = {
       video_url_1: staged[0].url,
       video_url_2: staged[1].url,
-      use_sample_data: useSampleData,
+    }
+    if (useSampleData !== null) {
+      body.use_sample_data = useSampleData
     }
 
     const res = await createJob(body)
@@ -59,7 +67,7 @@ export function JobProvider({ children }: { children: ReactNode }) {
 
   const reset = useCallback(() => {
     setStaged([])
-    setUseSampleData(true)
+    setUseSampleData(null)
     setCurrentJobId(null)
     setResult(null)
   }, [])

@@ -9,9 +9,12 @@ interface ProgressMonitorProps {
   progressVal: number;
   elapsed: number;
   onAbort: () => void;
+  /** Live message published by the Celery task over the progress websocket. */
+  statusMessage?: string;
+  jobStatus?: string;
 }
 
-export default function ProgressMonitor({ jobId, stagedVideos, progressVal, elapsed, onAbort }: ProgressMonitorProps) {
+export default function ProgressMonitor({ jobId, stagedVideos, progressVal, elapsed, onAbort, statusMessage, jobStatus }: ProgressMonitorProps) {
   
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60).toString().padStart(2, '0');
@@ -50,24 +53,24 @@ export default function ProgressMonitor({ jobId, stagedVideos, progressVal, elap
       </div>
 
       <div className="bg-[#1C1C28] rounded-3xl p-8 shadow-xl min-h-[200px] font-mono text-[13px] leading-relaxed">
-        <div className="text-gray-400 flex gap-4"><span className="text-purple-400">[{formatTime(Math.max(0, elapsed - 2))}]</span> System initialized · MOCK MODE</div>
-        <div className="text-gray-400 flex gap-4"><span className="text-purple-400">[{formatTime(Math.max(0, elapsed - 1))}]</span> Ingesting staged video parameters...</div>
-        <div className="text-gray-400 flex gap-4"><span className="text-purple-400">[{formatTime(elapsed)}]</span> <span className="text-green-400 font-bold">ok</span> executing Step {currentStep}</div>
+        <div className="text-gray-400 flex gap-4"><span className="text-purple-400">[{formatTime(0)}]</span> Job {jobId ?? ''} dispatched to the detection pipeline</div>
+        <div className="text-gray-400 flex gap-4"><span className="text-purple-400">[{formatTime(elapsed)}]</span> <span className="text-green-400 font-bold">{jobStatus ?? 'running'}</span> step {currentStep} of 5 &middot; {progressVal}%</div>
+        <div className="text-gray-400 flex gap-4"><span className="text-purple-400">[{formatTime(elapsed)}]</span> {statusMessage || `${stepName}...`}</div>
         <div className="text-gray-400 flex gap-4"><span className="text-purple-400 animate-pulse">_</span></div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-2">
         <div className="bg-white px-8 py-6 rounded-3xl shadow-sm border border-gray-100 text-center">
-          <p className="text-gray-400 text-[14px] font-bold uppercase tracking-wider mb-1">Pages</p>
-          <p className="text-4xl font-extrabold text-gray-900">{Math.max(1, Math.floor((progressVal / 100) * 124))}/124</p>
+          <p className="text-gray-400 text-[14px] font-bold uppercase tracking-wider mb-1">Stage</p>
+          <p className="text-4xl font-extrabold text-gray-900">{currentStep}/5</p>
         </div>
         <div className="bg-white px-8 py-6 rounded-3xl shadow-sm border border-gray-100 text-center">
           <p className="text-gray-400 text-[14px] font-bold uppercase tracking-wider mb-1">Elapsed</p>
           <p className="text-4xl font-extrabold text-gray-900">{formatTime(elapsed)}</p>
         </div>
         <div className="bg-white px-8 py-6 rounded-3xl shadow-sm border border-gray-100 text-center">
-          <p className="text-gray-400 text-[14px] font-bold uppercase tracking-wider mb-1">Throughput</p>
-          <p className="text-4xl font-extrabold text-gray-900">{progressVal > 0 && progressVal < 100 ? '50/s' : '0/s'}</p>
+          <p className="text-gray-400 text-[14px] font-bold uppercase tracking-wider mb-1">Progress</p>
+          <p className="text-4xl font-extrabold text-gray-900">{progressVal}%</p>
         </div>
       </div>
 

@@ -16,9 +16,12 @@ export const useJobProgress = (jobId: string | null) => {
     // Do not attempt connection if no job is queued
     if (!jobId) return;
 
-    // Use environment variable for the backend base URL (e.g., ws://localhost:8000)
-    const baseUrl = import.meta.env.VITE_WS_URL || 'ws://127.0.0.1:8000';
-    const ws = new WebSocket(`${baseUrl}/api/ws/${jobId}`);
+    // docker-compose supplies VITE_WS_BASE_URL, already including /api/ws.
+    // The previous code read VITE_WS_URL, which is never set, so the configured
+    // value was ignored and a hardcoded host was used instead.
+    const apiBase = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api';
+    const wsBase = import.meta.env.VITE_WS_BASE_URL ?? `${apiBase.replace(/^http/, 'ws')}/ws`;
+    const ws = new WebSocket(`${wsBase}/${jobId}`);
 
     setIsActive(true);
 

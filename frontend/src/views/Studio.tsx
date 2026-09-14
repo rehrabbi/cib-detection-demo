@@ -10,6 +10,54 @@ import ProfileMetrics from '../components/studio/ProfileMetrics'
 import CommenterList from '../components/studio/CommenterList'
 import type { JobResult, Commenter } from '../types'
 
+// The API returns SHAP keyed by the backend's feature names; every component
+// here keys on the UI names in types.ts. Without this translation shapLocal and
+// shapGlobal look populated but every lookup misses, so the SHAP panel renders
+// nothing and the PDF export throws on `.toFixed()` of undefined.
+const SHAP_KEY_MAP: Record<string, string> = {
+  commenting_frequency: 'commentFrequency',
+  temporal_burst_activity: 'temporalBurst',
+  tfidf_content_repetition: 'contentRepetition',
+  reply_count: 'replyCount',
+  degree_centrality: 'degreeCentrality',
+  clustering_coefficient: 'clusteringCoeff',
+};
+
+// Always returns all six keys. The backend only explains the top 100
+// commenters, so the rest carry no SHAP at all, and the export builds strings
+// like `shapLocal.commentFrequency.toFixed(2)` with no guard. Defaulting to
+// zero removes that entire class of crash.
+const toUiShap = (shap: Record<string, number> | null | undefined) => {
+  const out: Record<string, number> = {
+    commentFrequency: 0,
+    temporalBurst: 0,
+    contentRepetition: 0,
+    replyCount: 0,
+    degreeCentrality: 0,
+    clusteringCoeff: 0,
+  };
+  if (!shap) return out;
+  for (const [key, value] of Object.entries(shap)) {
+    out[SHAP_KEY_MAP[key] ?? key] = Number(value) || 0;
+  }
+  return out;
+};
+
+// Strongest contributor by absolute SHAP value. Sign indicates direction, so
+// magnitude is what identifies the feature that drove the classification.
+const strongestFeature = (uiShap: Record<string, number>): string => {
+  let best = '';
+  let bestAbs = -1;
+  for (const [key, value] of Object.entries(uiShap)) {
+    const magnitude = Math.abs(value);
+    if (magnitude > bestAbs) {
+      bestAbs = magnitude;
+      best = key;
+    }
+  }
+  return best || 'commentFrequency';
+};
+
 export default function Studio() {
   const navigate = useNavigate()
   const location = useLocation() 
@@ -42,12 +90,50 @@ export default function Studio() {
     async function fetchJobData() {
       try {
         // NOTE: Adjust the port (8000) if your FastAPI is running elsewhere
-        const response = await fetch(`http://localhost:8000/api/jobs/${jobId}`);
+        const apiBase = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api';
+        const response = await fetch(`${apiBase}/results/${jobId}`);
         if (!response.ok) {
           throw new Error("Failed to fetch job data from backend.");
         }
         
-        const data = await response.json();
+        const raw = await response.json();
+        // /api/results returns { job, summary, global_shap, network_graph, commenters }.
+        // Flatten job to the top level and alias commenters -> results so the
+        // mapping below reads the same field names it always did.
+        const data: any = { ...raw, ...(raw.job || {}), results: raw.commenters || [] };
+
+        // The API returns every commenter, ordered by cib_risk_score desc.
+        // Components expect the mockData contract: `commenters` is the top 100
+        // (clickable, SHAP-explained) and `allCommenters` is the full list.
+        // Feeding all rows into `commenters` defeats NetworkGraph's node cap
+        // and locks the renderer on large jobs.
+        const mapRow = (row: any) => ({
+          hashId: row.commenter_hash,
+          riskScore: row.cib_risk_score,
+          label: row.classification,
+          topFeature: strongestFeature(toUiShap(row.shap_values)),
+          metrics: {
+            commentFrequency: row.commenting_frequency,
+            temporalBurst: row.temporal_burst_activity,
+            contentRepetition: row.tfidf_content_repetition,
+            replyCount: row.reply_count,
+            degreeCentrality: row.degree_centrality,
+            clusteringCoeff: row.clustering_coefficient,
+          },
+          shapLocal: toUiShap(row.shap_values),
+          cluster: row.classification === 'Anomalous' ? 1 : 0
+        });
+        const allMapped = (data.results || []).map(mapRow);
+
+        const graphElements = data.network_graph?.elements ?? [];
+        const degreeCarrying = new Set<string>();
+        for (const el of graphElements) {
+          if (el?.data && el.data.source !== undefined) {
+            degreeCarrying.add(el.data.source);
+            degreeCarrying.add(el.data.target);
+          }
+        }
+        const overlappingCount = degreeCarrying.size;
         
         // Ensure data is structured to match the JobResult interface expected by the UI
         const mappedResult: any = {
@@ -62,28 +148,19 @@ export default function Studio() {
           // ─── THE FIX: INJECT MISSING STATS SO OVERVIEW.TSX DOES NOT CRASH ───
           totalOrganic: data.summary?.organic || (data.results || []).filter((r: any) => r.classification === 'Organic').length,
           totalAnomalous: data.summary?.anomalous || (data.results || []).filter((r: any) => r.classification === 'Anomalous').length,
-          overlappingCommenters: data.summary?.overlapping_commenters || 15,
+          // Commenters present on both videos. They are exactly the nodes
+          // carrying at least one edge, since an edge requires co-commenting on
+          // two distinct videos. Previously hardcoded to 15.
+          overlappingCommenters: overlappingCount,
           // ──────────────────────────────────────────────────────────────────
           
-          // Map real DB commenter rows to Commenter interface
-          commenters: (data.results || []).map((row: any, index: number) => ({
-            hashId: row.commenter_hash,
-            riskScore: row.cib_risk_score,
-            label: row.classification, // "Anomalous" or "Organic"
-            topFeature: "temporalBurst", // (Optional) calculate highest SHAP value here
-            metrics: {
-              commentFrequency: row.commenting_frequency,
-              temporalBurst: row.temporal_burst_activity,
-              contentRepetition: row.tfidf_content_repetition,
-              replyCount: row.reply_count,
-              degreeCentrality: row.degree_centrality,
-              clusteringCoeff: row.clustering_coefficient,
-            },
-            shapLocal: row.shap_values || {},
-            cluster: row.classification === 'Anomalous' ? 1 : 0 // Simplified cluster flag
-          })),
+          commenters: allMapped.slice(0, 100),
+          allCommenters: allMapped,
           
-          shapGlobal: data.global_shap || {},
+          shapGlobal: toUiShap(data.global_shap),
+
+          // Real co-commenter graph from build_cocommenter_graph().
+          networkGraph: data.network_graph || null,
           
           // MAP REAL YOUTUBE VIDEOS (Reads titles passed from Analyze.tsx!)
           // Fallback to the Video ID if the title got lost during a page refresh.

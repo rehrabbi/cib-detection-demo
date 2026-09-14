@@ -60,19 +60,29 @@ class HybridModelBundle:
                 # the model, the background summary, and the score bounds.
                 model_artifact = joblib.load(model_path)
                 
-                # If the artifact is just the raw model (from an old build), handle it gracefully
-                # though training scripts MUST be updated to save the dict structure.
-                if isinstance(model_artifact, dict):
-                    model = model_artifact["model"]
-                    background_summary = model_artifact.get("background_summary")
-                    d_min_train = model_artifact.get("d_min_train", -0.5) # Default fallback
-                    d_max_train = model_artifact.get("d_max_train", 0.5)  # Default fallback
-                else:
-                    model = model_artifact
-                    background_summary = None
-                    # Fallback values if bounds weren't saved
-                    d_min_train, d_max_train = -0.5, 0.5 
-                    logger.warning("Loaded old model format. SHAP and Risk Scores may fail or be inaccurate.")
+                # A legacy raw-estimator artifact carries no training score bounds.
+                # Substituting placeholder bounds would leave every CIB risk score
+                # silently wrong while the dashboard still looked normal, so this
+                # refuses to load instead of warning.
+                if not isinstance(model_artifact, dict):
+                    raise ValueError(
+                        f"Model artifact at {model_path} is in the legacy raw-estimator "
+                        "format. Regenerate it so the bundle contains 'model', "
+                        "'background_summary', 'd_min_train' and 'd_max_train'."
+                    )
+
+                required = ("model", "background_summary", "d_min_train", "d_max_train")
+                missing = [k for k in required if k not in model_artifact]
+                if missing:
+                    raise ValueError(
+                        f"Model artifact at {model_path} is missing required keys: "
+                        f"{missing}. Regenerate it."
+                    )
+
+                model = model_artifact["model"]
+                background_summary = model_artifact["background_summary"]
+                d_min_train = model_artifact["d_min_train"]
+                d_max_train = model_artifact["d_max_train"]
 
                 logger.info("Loaded model %s with scaler %s", model_path, scaler_path)
                 cls._instance = cls(

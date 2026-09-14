@@ -104,18 +104,3 @@ export const getJobResult = (videoCount: number) => {
   }
   return buildDataset('CIB-9928A', 1200, 0.052, videoCount);
 };
-
-export const generateExecutiveSummary = (result: any) => {
-  if (!result || !result.commenters) return "Insufficient data for summary generation.";
-
-  const density = result.anomalyRate >= 0.5 ? "high" : "low";
-  const topAnomalous = result.commenters.filter((c: any) => c.label === 'Anomalous');
-  
-  const features = topAnomalous.map((c: any) => c.topFeature);
-  const mostCommonFeature = features.sort((a: any,b: any) =>
-        features.filter((v: any) => v===a).length
-      - features.filter((v: any) => v===b).length
-  ).pop() || "suspicious temporal bursts";
-
-  return `The analysis of the provided media indicates a ${density} concentration of coordinated inauthentic behavior (CIB). A cluster of ${result.totalAnomalous} anomalous profiles was detected primarily exhibiting ${mostCommonFeature}. The topology of the network suggests a centralized dissemination strategy, where organic accounts are interacting with peripheral anomalous bots. The contamination parameter of ${result.contamination} was used to bound this evaluation.`;
-};

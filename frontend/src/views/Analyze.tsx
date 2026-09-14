@@ -164,6 +164,7 @@ export default function Analyze() {
           <ProgressMonitor 
             jobId={currentJobId} stagedVideos={staged}
             progressVal={progressVal} elapsed={elapsed} onAbort={handleAbort}
+            statusMessage={jobData?.message} jobStatus={jobData?.status}
           />
         )}
         

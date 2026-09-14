@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { FileText, X, FileSpreadsheet, ChevronDown, AlertTriangle } from 'lucide-react';
-import { generateExecutiveSummary } from '../../data/mockData';
+import { generateExecutiveSummary } from '../../data/summary';
 
 interface ExportModalProps {
   isOpen: boolean;

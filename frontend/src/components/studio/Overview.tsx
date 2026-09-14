@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { AlertTriangle, Info, ChevronDown } from 'lucide-react';
-import { generateExecutiveSummary } from '../../data/mockData';
+import { generateExecutiveSummary } from '../../data/summary';
 
 export default function Overview({ result }: { result: any }) {
   // ─── BULLETPROOF FALLBACKS TO PREVENT WHITE SCREENS ───
