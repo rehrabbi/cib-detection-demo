@@ -1,0 +1,86 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: cib_postgres
+    environment:
+      POSTGRES_USER: cib_user
+      POSTGRES_PASSWORD: cib_pass
+      POSTGRES_DB: cib_detection
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cib_user -d cib_detection"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: cib_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./backend
+    container_name: cib_api
+    # MODIFIED: Changed from api.jobs:app to app.main:app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    environment:
+      - DATABASE_URL=postgresql://cib_user:cib_pass@postgres:5432/cib_detection
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: ./backend
+    container_name: cib_worker
+    # MODIFIED: Changed from api.jobs.celery to app.celery_app
+    command: celery -A app.celery_app worker --loglevel=info
+    volumes:
+      - ./backend:/app
+    environment:
+      - DATABASE_URL=postgresql://cib_user:cib_pass@postgres:5432/cib_detection
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    container_name: cib_frontend
+    # This runs your React/Vite development server
+    # The --host flag is required for Vite to be accessible outside the Docker container
+    command: npm run dev -- --host 0.0.0.0
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules # Protects container node_modules from being overwritten by your host machine
+    environment:
+      # MODIFIED: Matched exact variable names used in your frontend code
+      - VITE_API_BASE_URL=http://localhost:8000/api
+      - VITE_WS_BASE_URL=ws://localhost:8000/api/ws
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  redis_data:

@@ -1,0 +1,12 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@700;800&family=Krub:wght@400;500;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --blue-linear-gradient: linear-gradient(to right, #377EC0 37%, #0A1C9C 100%);
+    --green-linear-gradient: linear-gradient(to top, #EEEFF0 0%, #DBF5AF 26%, #CAF976 36%, #65C526 69%, #38AE02 85%);
+  }
+}

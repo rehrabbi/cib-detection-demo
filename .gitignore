@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+env/
+.env
+
+# ML / artifacts
+mlruns/
+# The synthetic demo model is tracked on purpose; it is what this
+# repository exists to ship.
+training/outputs/
+training/logs/
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

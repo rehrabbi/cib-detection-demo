@@ -1,0 +1,13 @@
+{
+  "synthetic": true,
+  "not_for_reporting": true,
+  "purpose": "tool demonstration only",
+  "source": "app/seed/generator.py",
+  "videos": 120,
+  "commenters": 53990,
+  "train_rows": 43192,
+  "validation_rows": 10798,
+  "contamination": 0.05,
+  "random_state": 42,
+  "generated_utc": "2026-09-14T01:30:42Z"
+}
