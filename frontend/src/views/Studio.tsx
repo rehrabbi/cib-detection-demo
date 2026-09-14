@@ -79,6 +79,7 @@ export default function Studio() {
   const [showExportModal, setShowExportModal] = useState(false)
   const [cyInstance, setCyInstance] = useState<any>(null);
   const [showViewInfo, setShowViewInfo] = useState(false)
+  const [pendingStatus, setPendingStatus] = useState<string | null>(null)
 
   // 1. Fetch Real Data from FastAPI
   useEffect(() => {
@@ -87,7 +88,18 @@ export default function Studio() {
       return;
     }
 
+    // Polling must stop once the job reaches a terminal state. The results
+    // payload is several megabytes on a real job, so a loop that keeps running
+    // after completion re-downloads it every few seconds forever.
+    let timer: number | undefined;
+    let stopped = false;
+    const stopPolling = () => {
+      stopped = true;
+      if (timer !== undefined) window.clearInterval(timer);
+    };
+
     async function fetchJobData() {
+      if (stopped) return;
       try {
         // NOTE: Adjust the port (8000) if your FastAPI is running elsewhere
         const apiBase = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000/api';
@@ -97,6 +109,24 @@ export default function Studio() {
         }
         
         const raw = await response.json();
+
+        // A job that has not finished carries summary, global_shap and
+        // network_graph as null and an empty commenter list. Rendering that
+        // produces a report that looks complete and says zero, so wait for the
+        // job to reach a terminal state instead. This happens whenever the
+        // studio URL is opened directly, bookmarked, shared or refreshed while
+        // the pipeline is still running.
+        const jobStatus = raw?.job?.status;
+        if (jobStatus && jobStatus !== 'completed' && jobStatus !== 'failed') {
+          setPendingStatus(raw.job.message || jobStatus);
+          return;
+        }
+        stopPolling();
+        if (jobStatus === 'failed') {
+          setError(raw.job.error || raw.job.message || 'The detection job failed.');
+          return;
+        }
+        setPendingStatus(null);
         // /api/results returns { job, summary, global_shap, network_graph, commenters }.
         // Flatten job to the top level and alias commenters -> results so the
         // mapping below reads the same field names it always did.
@@ -139,8 +169,8 @@ export default function Studio() {
         const mappedResult: any = {
           jobId: data.id,
           // Format the dates nicely
-          dateProcessed: new Date(data.completed_at).toLocaleDateString('en-PH'),
-          timeProcessed: new Date(data.completed_at).toLocaleTimeString('en-PH'),
+          dateProcessed: data.completed_at ? new Date(data.completed_at).toLocaleDateString('en-PH') : '-',
+          timeProcessed: data.completed_at ? new Date(data.completed_at).toLocaleTimeString('en-PH') : '-',
           contamination: 0.05, // Default fallback if not in DB
           totalCommenters: data.summary?.total_commenters || 0,
           anomalyRate: data.summary?.anomaly_detection_rate || 0,
@@ -188,12 +218,18 @@ export default function Studio() {
         }
         
       } catch (err: any) {
+        // A transient failure while polling should not replace a result that is
+        // already on screen; only a failure on the first load is fatal.
+        if (stopped) return;
         console.error(err);
         setError(err.message);
+        stopPolling();
       }
     }
 
     fetchJobData();
+    timer = window.setInterval(fetchJobData, 3000);
+    return () => stopPolling();
   }, [jobId, location.state]);
 
   const tabs = [    
@@ -213,7 +249,12 @@ export default function Studio() {
     return <div className="h-screen w-full flex items-center justify-center font-bold text-red-500">{error}</div>
   }
   if (!result) {
-    return <div className="h-screen w-full flex items-center justify-center font-bold text-gray-500">Connecting to CIBWatch Pipeline...</div>
+    return (
+      <div className="h-screen w-full flex flex-col items-center justify-center gap-2 font-bold text-gray-500">
+        <span>{pendingStatus ? 'Detection job still running' : 'Connecting to CIBWatch Pipeline...'}</span>
+        {pendingStatus && <span className="font-normal text-sm text-gray-400">{pendingStatus}</span>}
+      </div>
+    )
   }
 
   return (
