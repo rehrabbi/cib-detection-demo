@@ -19,6 +19,10 @@ function LabelBadge({ label }: { label: string }) {
   );
 }
 
+// Upper bound on rendered rows. A real job returns thousands of commenters and
+// the table is not virtualised.
+const MAX_ROWS = 200;
+
 export default function CommenterList({ result, selected, onSelect }: { result: any, selected: any, onSelect: (c: any) => void }) {
   const [filter, setFilter] = useState('All');
   
@@ -35,9 +39,14 @@ export default function CommenterList({ result, selected, onSelect }: { result: 
   };
 
   const rows = useMemo(() => {
-    const filtered = result.commenters.filter((c: any) => filter === 'All' ? true : c.label === filter);
-    
-    return filtered.sort((a: any, b: any) => {
+    // Filter across every commenter, not just the explained top 100. Those are
+    // ranked by risk and are therefore all Anomalous, so filtering within them
+    // left the Organic tab permanently empty. The rendered rows are capped
+    // instead, which keeps the DOM bounded without hiding a whole class.
+    const source = result.allCommenters ?? result.commenters ?? [];
+    const filtered = source.filter((c: any) => filter === 'All' ? true : c.label === filter);
+
+    return [...filtered].sort((a: any, b: any) => {
 
       if (sortConfig.key === 'riskScore') {
         return sortConfig.direction === 'asc' ? a.riskScore - b.riskScore : b.riskScore - a.riskScore;
@@ -52,7 +61,7 @@ export default function CommenterList({ result, selected, onSelect }: { result: 
       }
       
       return 0;
-    });
+    }).slice(0, MAX_ROWS);
   }, [result, filter, sortConfig]); 
 
   useEffect(() => {

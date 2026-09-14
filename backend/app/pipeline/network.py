@@ -219,28 +219,84 @@ def compute_network_features(graph: nx.Graph) -> pd.DataFrame:
     )
 
 
-def graph_to_cytoscape(graph: nx.Graph, classifications: dict[str, str]) -> dict:
-    """Convert the NetworkX graph into a Cytoscape.js-compatible elements payload."""
-    elements = []
-    for node in graph.nodes():
-        elements.append(
-            {
-                "data": {
-                    "id": node,
-                    "label": node[:8],
-                    "classification": classifications.get(node, "Organic"),
-                }
+# Upper bounds on the serialised graph. The co-commenter graph of a two-video
+# job is a clique among commenters present on both videos, so its edge count
+# grows quadratically with overlap: 2,084 shared commenters produce 2,170,486
+# edges, which serialise to roughly 712 MB of JSON and exceed PostgreSQL's 1 GB
+# limit for a single value. The job then completes its analysis and dies on the
+# final write. The viewer renders a few hundred nodes at most, so the stored
+# graph is bounded and the true totals are recorded alongside it.
+MAX_CYTOSCAPE_NODES = 600
+MAX_CYTOSCAPE_EDGES = 25_000
+
+
+def graph_to_cytoscape(
+    graph: nx.Graph,
+    classifications: dict[str, str],
+    max_nodes: int = MAX_CYTOSCAPE_NODES,
+    max_edges: int = MAX_CYTOSCAPE_EDGES,
+) -> dict:
+    """Convert the NetworkX graph into a Cytoscape.js-compatible elements payload.
+
+    Returns the elements plus a ``stats`` block carrying the real totals, so a
+    truncated render can still report the true size of the graph rather than the
+    size of the excerpt.
+    """
+    degrees = dict(graph.degree())
+    connected = [n for n, d in degrees.items() if d > 0]
+    isolated_count = graph.number_of_nodes() - len(connected)
+
+    # Highest degree first: those carry the structure worth looking at.
+    connected.sort(key=lambda n: degrees[n], reverse=True)
+    kept_connected = connected[:max_nodes]
+
+    # A little isolated context, so the viewer can see they exist.
+    remaining = max(max_nodes - len(kept_connected), 0)
+    kept_isolated = [n for n, d in degrees.items() if d == 0][:min(remaining, 60)]
+
+    kept = kept_connected + kept_isolated
+    kept_set = set(kept)
+
+    elements = [
+        {
+            "data": {
+                "id": node,
+                "label": node[:8],
+                "classification": classifications.get(node, "Organic"),
             }
-        )
+        }
+        for node in kept
+    ]
+
+    edge_count = 0
     for u, v, data in graph.edges(data=True):
-        elements.append(
-            {
-                "data": {
-                    "id": f"{u}__{v}",
-                    "source": u,
-                    "target": v,
-                    "weight": data.get("weight", 1),
+        if u in kept_set and v in kept_set:
+            if edge_count >= max_edges:
+                break
+            elements.append(
+                {
+                    "data": {
+                        "id": f"{u}__{v}",
+                        "source": u,
+                        "target": v,
+                        "weight": data.get("weight", 1),
+                    }
                 }
-            }
-        )
-    return {"elements": elements}
+            )
+            edge_count += 1
+
+    return {
+        "elements": elements,
+        "stats": {
+            "total_nodes": graph.number_of_nodes(),
+            "total_edges": graph.number_of_edges(),
+            "connected_nodes": len(connected),
+            "isolated_nodes": isolated_count,
+            "rendered_nodes": len(kept),
+            "rendered_edges": edge_count,
+            "truncated": (
+                len(kept) < graph.number_of_nodes()
+                or edge_count < graph.number_of_edges()
+            ),
+        },
+    }

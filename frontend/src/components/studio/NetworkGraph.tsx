@@ -109,16 +109,23 @@ const buildGraph = (result: any) => {
     data: { id: e.data.id ?? `e${i}`, source: e.data.source, target: e.data.target },
   }));
 
+  // The server bounds what it stores, so counting the payload would report the
+  // size of the excerpt rather than of the graph. Prefer its stats when present.
+  const server = result?.networkGraph?.stats;
+
   return {
     elements: [...nodes, ...edges],
     stats: {
-      totalNodes: rawNodes.length,
-      totalEdges: rawEdges.length,
-      connected: connected.length,
-      isolated: isolated.length,
+      totalNodes: server?.total_nodes ?? rawNodes.length,
+      totalEdges: server?.total_edges ?? rawEdges.length,
+      connected: server?.connected_nodes ?? connected.length,
+      isolated: server?.isolated_nodes ?? isolated.length,
       shownNodes: nodes.length,
       shownEdges: edges.length,
-      truncated: edgesTruncated || connected.length > MAX_CONNECTED_NODES,
+      truncated:
+        Boolean(server?.truncated) ||
+        edgesTruncated ||
+        connected.length > MAX_CONNECTED_NODES,
     },
   };
 };

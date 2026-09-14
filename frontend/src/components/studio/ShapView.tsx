@@ -14,8 +14,8 @@ const SAFE_BEHAVIORAL = ['commentFrequency', 'temporalBurst', 'contentRepetition
 
 interface Row { label: string; value: number; pct: string; behavioral: boolean; }
 
-function toRows(shap: Record<string, number>): Row[] {
-  if (!shap) return [];
+function toRows(shap: Record<string, number>, hasShap: boolean = true): Row[] {
+  if (!shap || !hasShap) return [];
   return Object.keys(shap)
     .map((k) => ({
       label: SAFE_LABELS[k] || k,
@@ -55,9 +55,24 @@ export default function ShapView({ commenter, result }: { commenter: any, result
     return <div className="p-10 text-center text-gray-400 font-bold">Select a commenter to view XAI attribution.</div>;
   }
 
+  // Attribution is computed for the top 100 commenters by anomaly score only.
+  // Anyone outside that set has no SHAP values, and rendering their zeros as a
+  // chart would present an absent result as a real one.
+  const explained = commenter.hasShap !== false;
+
   return (
     <div className="animate-in fade-in zoom-in-95 duration-300">
-      <ShapChart title="Localized SHAP Attribution" rows={toRows(commenter.shapLocal)} />
+      {explained ? (
+        <ShapChart title="Localized SHAP Attribution" rows={toRows(commenter.shapLocal)} />
+      ) : (
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6 text-center">
+          <h4 className="mb-2 font-['Plus_Jakarta_Sans'] text-lg font-extrabold text-gray-900">Localized SHAP Attribution</h4>
+          <p className="text-sm text-gray-500">
+            No attribution was computed for this commenter. SHAP is calculated for
+            the 100 highest-scoring commenters only.
+          </p>
+        </div>
+      )}
       <ShapChart title="Top 100 Mean Absolute Shap Value" rows={toRows(result.shapGlobal)} />
     </div>
   )

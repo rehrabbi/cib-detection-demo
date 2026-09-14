@@ -190,6 +190,17 @@ def run_detection(job_id: str) -> dict:
 
     except Exception as e:  # noqa: BLE001
         logger.exception("Detection job %s failed.", job_id)
+        # A failure during flush leaves the session unusable, so recording the
+        # failure would itself raise PendingRollbackError and the job would sit
+        # in its last running state forever. Roll back and re-load first.
+        try:
+            db.rollback()
+            job = db.get(DetectionJob, job_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("Could not roll back session for job %s.", job_id)
+            return {"job_id": job_id, "status": "failed", "error": str(e)}
+        if job is None:
+            return {"job_id": job_id, "status": "failed", "error": str(e)}
         job.error = f"{e}\n{traceback.format_exc()}"
         _update(job, db, status=JobStatus.FAILED, progress=100, message=f"Failed: {e}")
         return {"job_id": job.id, "status": job.status, "error": str(e)}

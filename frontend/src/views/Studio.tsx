@@ -151,6 +151,10 @@ export default function Studio() {
             clusteringCoeff: row.clustering_coefficient,
           },
           shapLocal: toUiShap(row.shap_values),
+          // The backend only explains the top 100 commenters by anomaly score.
+          // Everyone else has no attribution at all, and a zero-filled chart
+          // would read as a real result rather than an absent one.
+          hasShap: Object.keys(row.shap_values || {}).length > 0,
           cluster: row.classification === 'Anomalous' ? 1 : 0
         });
         const allMapped = (data.results || []).map(mapRow);
@@ -163,7 +167,9 @@ export default function Studio() {
             degreeCarrying.add(el.data.target);
           }
         }
-        const overlappingCount = degreeCarrying.size;
+        // The stored graph is bounded, so the server reports the true count.
+        const overlappingCount =
+          data.network_graph?.stats?.connected_nodes ?? degreeCarrying.size;
         
         // Ensure data is structured to match the JobResult interface expected by the UI
         const mappedResult: any = {
