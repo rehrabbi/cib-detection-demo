@@ -12,7 +12,12 @@ How to get this running and how to drive it in front of an audience.
 
 ## 1. What you need
 
-**Docker Desktop**, running. Nothing else. No Python, no Node, no database.
+**Docker Desktop**, installed and running. Nothing else. No Python, no Node, no
+database.
+
+Setting up on a machine for the first time needs **internet** and about **five
+minutes**, because the images download and install their dependencies. Do this
+before you are in the room, not in front of an audience.
 
 Check it is up:
 
@@ -153,32 +158,53 @@ Two limits worth knowing before you improvise on stage:
 
 ---
 
-## 5. Showing a finished result instantly
+## 5. Having a result ready before you present
 
-Live collection means 75 seconds of silence. For a smoother demonstration, open
-a result that has already been computed. These exist in the database on the
-machine where those jobs were run:
+**Saved jobs do not travel with the repository.** They live in the Docker
+database volume on the machine that ran them. A freshly set up machine starts
+with an empty database, so there is nothing to open until you run something.
 
-**7,072 commenters, 668 flagged, a 215 node clique in the graph**
+Live collection from YouTube takes 75 to 90 seconds, which is a long silence in
+front of a panel. So run one job when you set the machine up, keep the URL, and
+open that instantly when you present.
+
+### The fast way, about 10 seconds
+
+With the default `USE_SAMPLE_DATA=true`, no key and no internet needed:
+
+1. Go to **Analyze**
+2. Add these two URLs and click **Analyze**
 
 ```
-http://localhost:5173/studio?job_id=865090eb65c84b9086d79247cc0fb6d9
+https://www.youtube.com/watch?v=JMayyvnkRIk
+https://www.youtube.com/watch?v=Fm4w02wTUiY
 ```
 
-**81,301 commenters, 5,672 flagged, the largest pair in the corpus**
+It finishes in about ten seconds and gives 248 commenters, 54 flagged, with 28
+planted coordinated accounts among them. Copy the URL from your browser once it
+lands on the results page. It looks like:
 
 ```
-http://localhost:5173/studio?job_id=d2d0506a5563455da3b21452bf2a0ab7
+http://localhost:5173/studio?job_id=<32 characters>
 ```
 
-To list what is available on your machine:
+Keep that URL. Opening it later is instant.
+
+### The impressive way, about 90 seconds
+
+Set a real API key and `USE_SAMPLE_DATA=false` as in section 3, then run the same
+two videos. You get 7,072 real commenters, 668 flagged, and a co-commenter graph
+with a genuine 215 node structure in it. Do this once while setting up, keep the
+URL, and open it when you present.
+
+### Listing what you have
 
 ```bash
-docker exec cib_demo_postgres psql -U cib_user -d cib_detection -c "select id, status, summary->>'total_commenters' as commenters from detection_jobs where status='completed';"
+docker compose exec postgres psql -U cib_user -d cib_detection -c "select id, status, summary->>'total_commenters' as commenters from detection_jobs where status='completed';"
 ```
 
-If your containers are named `cib_postgres` rather than `cib_demo_postgres`, use
-that name instead. See section 8.
+Using `docker compose exec postgres` rather than a container name means this
+works whatever your containers happen to be called.
 
 ### What to point at on the results page
 
@@ -238,7 +264,8 @@ curl http://localhost:8000/api/health
 
 - [ ] Health returns `"status":"ok"`
 - [ ] `http://localhost:5173` loads
-- [ ] Your prepared `studio?job_id=...` link opens and shows real numbers
+- [ ] You have run one job on THIS machine and kept its
+      `studio?job_id=...` URL, and it opens showing real numbers
 - [ ] If using real comments, run one test job and confirm it takes 75 seconds
       rather than 10. That is the only reliable way to tell that the key works,
       since `youtube_api_configured` is true even for the placeholder
