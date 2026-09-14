@@ -16,6 +16,7 @@ class JobStatus(str, Enum):
     EXPLAINING = "explaining"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class DetectionJob(Base):

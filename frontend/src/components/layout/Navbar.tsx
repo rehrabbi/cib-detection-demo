@@ -1,8 +1,27 @@
+import { useEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { Menu, X } from 'lucide-react';
+
+// Every route in the header, so the desktop row and the mobile panel cannot
+// drift apart.
+const NAV_LINKS: { to: string; label: string }[] = [
+  { to: '/', label: 'Home' },
+  { to: '/analyze', label: 'Analyze' },
+  { to: '/how-it-works', label: 'How It Works' },
+  { to: '/about', label: 'About Us' },
+  { to: '/contact', label: 'Contact Us' },
+];
 
 export default function Navbar() {
   const location = useLocation();
   const path = location.pathname;
+
+  // The header links are hidden below md and previously had no replacement, so
+  // on a phone the only way to navigate was the footer.
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Close on navigation, otherwise the panel stays over the new page.
+  useEffect(() => setMenuOpen(false), [path]);
 
   const isActive = (route: string) => path === route;
 
@@ -77,7 +96,44 @@ export default function Navbar() {
             Contact Us
           </Link>
         </div>
+
+        {/* Mobile menu toggle */}
+        <button
+          type="button"
+          onClick={() => setMenuOpen((open) => !open)}
+          aria-label={menuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+          aria-expanded={menuOpen}
+          aria-controls="mobile-nav"
+          className="md:hidden z-10 flex h-11 w-11 items-center justify-center rounded-full text-[#0B3B8C] transition-colors hover:bg-white/20"
+        >
+          {menuOpen ? <X className="h-6 w-6" strokeWidth={2.5} /> : <Menu className="h-6 w-6" strokeWidth={2.5} />}
+        </button>
       </nav>
+
+      {/* Mobile navigation panel */}
+      {menuOpen && (
+        <div
+          id="mobile-nav"
+          className="md:hidden absolute left-6 right-6 top-24 z-40 rounded-3xl border border-white/40 bg-white/95 p-3 shadow-xl backdrop-blur"
+        >
+          <div className="flex flex-col gap-1 text-[15px] font-semibold">
+            {NAV_LINKS.map((link) => (
+              <Link
+                key={link.to}
+                to={link.to}
+                onClick={() => setMenuOpen(false)}
+                className={`rounded-2xl px-5 py-3 transition-colors ${
+                  isActive(link.to)
+                    ? 'bg-[#0B3B8C] text-white'
+                    : 'text-[#0B3B8C] hover:bg-[#0B3B8C]/10'
+                }`}
+              >
+                {link.label}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

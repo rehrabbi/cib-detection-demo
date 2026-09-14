@@ -10,6 +10,7 @@ import ProgressMonitor from '../components/analyze/ProgressMonitor';
 import { useJob } from '../lib/JobContext';
 
 import { useJobProgress } from '../hooks/useJobProgress'; 
+import { cancelJob } from '../lib/api';
 
 interface AlertToast { id: number; type: 'error' | 'warning'; boldText: string; message: string; }
 
@@ -108,11 +109,20 @@ export default function Analyze() {
     resetContext();
   };
 
-  const handleAbort = () => {
-    setStatus('idle'); 
-    setProgressVal(0); 
+  const handleAbort = async () => {
+    // Resetting local state alone left the worker running: still collecting,
+    // still spending YouTube quota, still writing results, while the user
+    // believed the job had stopped. Tell the backend first.
+    const jobId = currentJobId;
+    setStatus('idle');
+    setProgressVal(0);
     setElapsed(0);
-    // Note: If your backend supports canceling jobs, you would call that API route here
+    if (!jobId) return;
+    try {
+      await cancelJob(jobId);
+    } catch (err: any) {
+      triggerAlert('warning', 'Abort incomplete', err?.message || 'The job may still be running on the server.');
+    }
   };
 
   return (

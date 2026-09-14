@@ -1,6 +1,7 @@
 """Job submission and status endpoints — Step 1 of the System Architecture."""
 
 import uuid
+from datetime import datetime, timezone
 
 # 1. IMPORT Body from fastapi
 from fastapi import APIRouter, Depends, HTTPException, Request, Body 
@@ -8,10 +9,12 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
+from app.celery_app import celery_app
 from app.config import get_settings
 from app.database import get_db
 from app.models import DetectionJob, JobStatus
 from app.pipeline.collector import extract_video_id
+from app.progress import publish
 from app.schemas import JobStatusOut, JobSubmitRequest, JobSubmitResponse
 from app.tasks import run_detection
 
@@ -69,7 +72,9 @@ def submit_job(
         db.commit()
         db.refresh(job)
 
-        run_detection.delay(job_id)
+        # The Celery task id is set to the job id so a cancel request can revoke
+        # the running task without storing a second identifier.
+        run_detection.apply_async(args=[job_id], task_id=job_id)
 
         return JobSubmitResponse(job_id=job_id, status=job.status)
         
@@ -92,3 +97,45 @@ def get_job(request: Request, job_id: str, db: Session = Depends(get_db)) -> Job
 def list_jobs(request: Request, db: Session = Depends(get_db)) -> list[JobStatusOut]:
     jobs = db.query(DetectionJob).order_by(DetectionJob.created_at.desc()).limit(50).all()
     return [JobStatusOut.model_validate(j) for j in jobs]
+
+
+@router.post("/{job_id}/cancel", response_model=JobStatusOut)
+def cancel_job(job_id: str, db: Session = Depends(get_db)) -> JobStatusOut:
+    """Stop a running detection job.
+
+    The job is marked cancelled first, so the worker sees it at its next stage
+    boundary even if the revoke does not land, and the task is then revoked.
+    Terminal jobs are returned unchanged, which makes repeat calls harmless.
+    """
+    job = db.get(DetectionJob, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found.")
+
+    terminal = {
+        JobStatus.COMPLETED.value,
+        JobStatus.FAILED.value,
+        JobStatus.CANCELLED.value,
+    }
+    if job.status in terminal:
+        return JobStatusOut.model_validate(job)
+
+    job.status = JobStatus.CANCELLED.value
+    job.message = "Cancelled by user."
+    job.completed_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(job)
+
+    publish(
+        job.id,
+        {
+            "job_id": job.id,
+            "status": job.status,
+            "progress": job.progress,
+            "message": job.message,
+        },
+    )
+
+    # terminate=True stops work already in flight, such as a long collection loop.
+    celery_app.control.revoke(job_id, terminate=True, signal="SIGTERM")
+
+    return JobStatusOut.model_validate(job)

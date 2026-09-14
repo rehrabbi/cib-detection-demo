@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
+from sqlalchemy import select
 
 from app.celery_app import celery_app
 from app.config import BASE_DIR, get_settings
@@ -62,6 +63,25 @@ def _update(
     )
 
 
+
+class JobCancelled(Exception):
+    """Raised when a user cancels a job while it is running."""
+
+
+def _raise_if_cancelled(db, job_id: str) -> None:
+    """Stop the pipeline if the job was cancelled through the API.
+
+    revoke(terminate=True) handles work already in flight, but a signal can
+    arrive at an awkward moment or be missed entirely. Checking the stored
+    status at each stage boundary guarantees a clean exit either way.
+    """
+    status = db.execute(
+        select(DetectionJob.status).where(DetectionJob.id == job_id)
+    ).scalar_one_or_none()
+    if status == JobStatus.CANCELLED.value:
+        raise JobCancelled()
+
+
 @celery_app.task(name="cib.run_detection")
 def run_detection(job_id: str) -> dict:
     settings = get_settings()
@@ -74,6 +94,7 @@ def run_detection(job_id: str) -> dict:
 
     try:
         _update(job, db, status=JobStatus.COLLECTING, progress=5, message="Collecting comments via YouTube Data API v3...")
+        _raise_if_cancelled(db, job_id)
 
         # Step 2: Comment collection
         if job.used_sample_data:
@@ -99,6 +120,8 @@ def run_detection(job_id: str) -> dict:
 
         _update(job, db, status=JobStatus.PREPROCESSING, progress=25, message="Preprocessing and SHA-256 anonymizing...")
 
+        _raise_if_cancelled(db, job_id)
+
         # Step 3: Preprocessing
         df = preprocess(raw_records)
         if df.empty:
@@ -114,6 +137,8 @@ def run_detection(job_id: str) -> dict:
 
         _update(job, db, status=JobStatus.EXTRACTING, progress=45, message="Computing behavioral and network features...")
 
+        _raise_if_cancelled(db, job_id)
+
         # Step 4: Behavioral + network feature extraction
         behavioral = compute_behavioral_features(df, burst_window_seconds=settings.burst_window_seconds)
         
@@ -126,6 +151,8 @@ def run_detection(job_id: str) -> dict:
 
         _update(job, db, status=JobStatus.SCORING, progress=65, message="Scoring with the pre-fitted Isolation Forest...")
 
+        _raise_if_cancelled(db, job_id)
+
         bundle = HybridModelBundle.load(
             scaler_path=(BASE_DIR / Path(settings.scaler_path)).resolve(),
             model_path=(BASE_DIR / Path(settings.model_path)).resolve(),
@@ -133,6 +160,8 @@ def run_detection(job_id: str) -> dict:
         scored = bundle.score(features)
 
         _update(job, db, status=JobStatus.EXPLAINING, progress=80, message="Computing SHAP feature attribution...")
+
+        _raise_if_cancelled(db, job_id)
 
         # THESIS CONSTRAINT: Cap SHAP computation at the Top 100 flagged commenters
         top_100_anomalies = scored.sort_values(by="cib_risk_score", ascending=False).head(100)
@@ -187,6 +216,11 @@ def run_detection(job_id: str) -> dict:
         
         _update(job, db, status=JobStatus.COMPLETED, progress=100, message="Done.")
         return {"job_id": job.id, "status": job.status}
+
+    except JobCancelled:
+        logger.info("Detection job %s cancelled by user.", job_id)
+        db.rollback()
+        return {"job_id": job_id, "status": JobStatus.CANCELLED.value}
 
     except Exception as e:  # noqa: BLE001
         logger.exception("Detection job %s failed.", job_id)

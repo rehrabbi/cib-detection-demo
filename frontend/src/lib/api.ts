@@ -76,3 +76,10 @@ export async function fetchResult(jobId: string): Promise<JobResult> {
   if (!res.ok) throw new Error(`fetchResult failed: ${res.status}`)
   return res.json()
 }
+
+/** Ask the backend to stop a running job. Safe to call on a finished job. */
+export async function cancelJob(jobId: string): Promise<JobStatusOut> {
+  const res = await fetch(`${BASE}/jobs/${jobId}/cancel`, { method: 'POST' })
+  if (!res.ok) throw new Error(`Failed to cancel job (${res.status})`)
+  return res.json()
+}

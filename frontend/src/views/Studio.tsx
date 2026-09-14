@@ -117,11 +117,16 @@ export default function Studio() {
         // studio URL is opened directly, bookmarked, shared or refreshed while
         // the pipeline is still running.
         const jobStatus = raw?.job?.status;
-        if (jobStatus && jobStatus !== 'completed' && jobStatus !== 'failed') {
+        const terminal = ['completed', 'failed', 'cancelled'];
+        if (jobStatus && !terminal.includes(jobStatus)) {
           setPendingStatus(raw.job.message || jobStatus);
           return;
         }
         stopPolling();
+        if (jobStatus === 'cancelled') {
+          setError(raw.job.message || 'This detection job was cancelled.');
+          return;
+        }
         if (jobStatus === 'failed') {
           setError(raw.job.error || raw.job.message || 'The detection job failed.');
           return;
